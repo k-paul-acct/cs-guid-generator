@@ -70,6 +70,13 @@ public static class GuidGenerator
         ref var varByte = ref span[8];
         varByte = (byte)((varByte & VarFieldMask) | 0x80);
 
-        return new Guid(span, true);
+        if (BitConverter.IsLittleEndian)
+        {
+            span[..4].Reverse();
+            span[4..6].Reverse();
+            span[6..8].Reverse();
+        }
+
+        return new Guid(span);
     }
 }
