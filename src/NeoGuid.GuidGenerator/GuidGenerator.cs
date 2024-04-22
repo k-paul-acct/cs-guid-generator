@@ -1,75 +1,84 @@
-﻿using System.Buffers.Binary;
+﻿using System;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 
-namespace NeoGuid.GuidGenerator;
-
-public static class GuidGenerator
+namespace NeoGuid.GuidGenerator
 {
-    private const byte VerFieldMask = 0x0F;
-    private const byte VarFieldMask = 0x3F;
-    private const long TicksMinStepV7 = 3;
-
-    private static readonly object LockObj = new();
-
-    private static long _lastUsedTicksV7 = 0 - TicksMinStepV7;
-
-    internal static readonly long UnixEpochTicks = DateTime.UnixEpoch.Ticks;
-
-    public static readonly Guid Nil = new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-    public static readonly Guid Max = new(0xFFFFFFFF, 0xFFFF, 0xFFFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Guid NewV4()
+    public static class GuidGenerator
     {
-        return Guid.NewGuid();
-    }
+        private const byte VerFieldMask = 0x0F;
+        private const byte VarFieldMask = 0x3F;
+        private const long TicksMinStepV7 = 3;
 
-    public static Guid NewV7()
-    {
-        var ticks = DateTime.UtcNow.Ticks - UnixEpochTicks;
+        private static readonly object LockObj = new object();
 
-        lock (LockObj)
+        private static long _lastUsedTicksV7 = 0 - TicksMinStepV7;
+
+        internal static readonly long UnixEpochTicks = DateTime.UnixEpoch.Ticks;
+
+        public static readonly Guid Nil = new Guid(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        public static readonly Guid Max = new Guid(0xFFFFFFFF, 0xFFFF, 0xFFFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Guid NewV4()
         {
-            if (ticks <= _lastUsedTicksV7 || ticks < 0)
+            return Guid.NewGuid();
+        }
+
+        public static Guid NewV7()
+        {
+            var ticks = DateTime.UtcNow.Ticks - UnixEpochTicks;
+
+            lock (LockObj)
             {
-                ticks = _lastUsedTicksV7 + TicksMinStepV7;
+                if (ticks <= _lastUsedTicksV7 || ticks < 0)
+                {
+                    ticks = _lastUsedTicksV7 + TicksMinStepV7;
+                }
+
+                _lastUsedTicksV7 = ticks;
             }
 
-            _lastUsedTicksV7 = ticks;
+            return NewV7(ticks);
         }
 
-        return NewV7(ticks);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Guid NewV7(DateTime timestamp)
-    {
-        return NewV7(timestamp.Ticks - UnixEpochTicks);
-    }
-
-    private static Guid NewV7(long ticks)
-    {
-        const double nanosFraction = 1.0 / TimeSpan.TicksPerMillisecond * (1 << 12);
-
-        if (ticks < 0)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Guid NewV7(DateTime timestamp)
         {
-            ticks = 0;
+            return NewV7(timestamp.Ticks - UnixEpochTicks);
         }
 
-        Span<byte> span = stackalloc byte[16];
-        var millis = ticks / TimeSpan.TicksPerMillisecond;
-        var nanos = (ushort)((ticks - millis * TimeSpan.TicksPerMillisecond) * nanosFraction);
+        private static Guid NewV7(long ticks)
+        {
+            const double nanosFraction = 1.0 / TimeSpan.TicksPerMillisecond * (1 << 12);
 
-        BinaryPrimitives.WriteInt64BigEndian(span, millis << 16);
-        BinaryPrimitives.WriteUInt16BigEndian(span[6..], nanos);
-        RandomNumberGenerator.Fill(span[8..]);
+            if (ticks < 0)
+            {
+                ticks = 0;
+            }
 
-        ref var verByte = ref span[6];
-        verByte = (byte)((verByte & VerFieldMask) | 0x70);
-        ref var varByte = ref span[8];
-        varByte = (byte)((varByte & VarFieldMask) | 0x80);
+            Span<byte> span = stackalloc byte[16];
+            var millis = ticks / TimeSpan.TicksPerMillisecond;
+            var nanos = (ushort)((ticks - millis * TimeSpan.TicksPerMillisecond) * nanosFraction);
 
-        return new Guid(span, true);
+            BinaryPrimitives.WriteInt64BigEndian(span, millis << 16);
+            BinaryPrimitives.WriteUInt16BigEndian(span[6..], nanos);
+            RandomNumberGenerator.Fill(span[8..]);
+
+            ref var verByte = ref span[6];
+            verByte = (byte)((verByte & VerFieldMask) | 0x70);
+            ref var varByte = ref span[8];
+            varByte = (byte)((varByte & VarFieldMask) | 0x80);
+
+            if (BitConverter.IsLittleEndian)
+            {
+                span[..4].Reverse();
+                span[4..6].Reverse();
+                span[6..8].Reverse();
+            }
+
+            return new Guid(span);
+        }
     }
 }
